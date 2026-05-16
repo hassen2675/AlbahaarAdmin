@@ -27,8 +27,8 @@ function fmtSerial(n: number) { return `#${String(n).padStart(5, '0')}`; }
 function fmtDate(d: string) { return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }); }
 
 // ── types ─────────────────────────────────────────────────────────────────────
-interface Profile  { id: string; name: string; plan: string; is_admin: boolean; created_at: string; }
-interface Code     { id: string; serial: number; code: string; plan: string; used_by: string | null; used_at: string | null; created_at: string; }
+interface Profile  { id: string; name: string; plan: string; is_admin: boolean; is_blocked: boolean; created_at: string; }
+interface Code     { id: string; serial: number; code: string; plan: string; price_tnd?: number; used_by: string | null; used_at: string | null; created_at: string; }
 interface Catch    { id: string; user_id: string; fish_name: string; weight?: number; location?: string; date?: string; created_at: string; }
 interface Post     { id: string; user_id: string; content: string; likes?: number; created_at: string; }
 
@@ -119,12 +119,57 @@ function LoginView({ onLogin }: { onLogin: (u: User) => void }) {
   );
 }
 
+// ── password reset modal ──────────────────────────────────────────────────────
+function ResetModal({ name, onClose }: { name: string; onClose: () => void }) {
+  const [email, setEmail] = useState('');
+  const [status, setStatus] = useState<'idle'|'ok'|'err'>('idle');
+  const [busy, setBusy] = useState(false);
+
+  async function send() {
+    if (!email.includes('@')) return;
+    setBusy(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    setStatus(error ? 'err' : 'ok');
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={onClose}>
+      <div style={{ background: '#0A1A35', border: `1px solid ${C.teal}30`, borderRadius: 18, padding: 28, width: 340 }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>🔑 Réinitialiser le mot de passe</div>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 18 }}>Utilisateur : <b style={{ color: C.white }}>{name}</b></div>
+
+        {status === 'ok' ? (
+          <div style={{ color: C.green, textAlign: 'center', padding: '12px 0' }}>✅ Email envoyé !</div>
+        ) : (
+          <>
+            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email du membre…" type="email"
+              style={{ width: '100%', background: 'rgba(255,255,255,.06)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '11px 13px', color: C.white, fontSize: 13, outline: 'none', marginBottom: 12 }}/>
+            {status === 'err' && <div style={{ color: C.red, fontSize: 11, marginBottom: 8 }}>⚠️ Erreur — vérifiez l'email.</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={onClose} style={{ flex: 1, padding: '10px 0', border: `1px solid ${C.border}`, borderRadius: 10, background: 'none', color: C.muted, cursor: 'pointer', fontSize: 13 }}>Annuler</button>
+              <button onClick={send} disabled={busy || !email.includes('@')} style={{ flex: 2, padding: '10px 0', border: 'none', borderRadius: 10, background: `linear-gradient(135deg,${C.teal}EE,${C.teal}88)`, color: '#020D1F', fontWeight: 800, cursor: 'pointer', fontSize: 13 }}>
+                {busy ? '…' : '📧 Envoyer'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── users tab ─────────────────────────────────────────────────────────────────
 function UsersTab() {
-  const [users, setUsers]   = useState<Profile[]>([]);
-  const [busy, setBusy]     = useState(true);
-  const [toggling, setT]    = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [users, setUsers]     = useState<Profile[]>([]);
+  const [busy, setBusy]       = useState(true);
+  const [toggling, setT]      = useState<string | null>(null);
+  const [search, setSearch]   = useState('');
+  const [resetUser, setReset] = useState<Profile | null>(null);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -143,6 +188,14 @@ function UsersTab() {
     setT(null);
   }
 
+  async function toggleBlock(u: Profile) {
+    setT(u.id + 'b');
+    const nb = !u.is_blocked;
+    await supabase.from('profiles').update({ is_blocked: nb }).eq('id', u.id);
+    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, is_blocked: nb } : x));
+    setT(null);
+  }
+
   async function toggleAdmin(u: Profile) {
     setT(u.id + 'a');
     await supabase.from('profiles').update({ is_admin: !u.is_admin }).eq('id', u.id);
@@ -157,48 +210,70 @@ function UsersTab() {
   if (busy) return <Spinner/>;
   return (
     <div>
+      {resetUser && <ResetModal name={resetUser.name} onClose={() => setReset(null)}/>}
+
       <input value={search} onChange={e => setSearch(e.target.value)}
         placeholder="Rechercher un utilisateur…"
-        style={{
-          width: '100%', marginBottom: 16, background: 'rgba(255,255,255,.05)',
-          border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 14px',
-          color: C.white, fontSize: 13, outline: 'none',
-        }}/>
+        style={{ width: '100%', marginBottom: 16, background: 'rgba(255,255,255,.05)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 14px', color: C.white, fontSize: 13, outline: 'none' }}/>
+
       <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>{filtered.length} utilisateur{filtered.length !== 1 ? 's' : ''}</div>
+
       {filtered.map(u => (
         <div key={u.id} style={{
-          background: C.card, border: `1px solid ${C.border}`, borderRadius: 14,
-          padding: '14px 16px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12,
+          background: C.card,
+          border: `1px solid ${u.is_blocked ? C.red + '40' : C.border}`,
+          borderRadius: 14, padding: '14px 16px', marginBottom: 10,
         }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 12, flexShrink: 0,
-            background: u.plan === 'premium' ? `${C.gold}20` : `${C.teal}12`,
-            border: `1.5px solid ${u.plan === 'premium' ? C.gold + '50' : C.teal + '30'}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 18,
-          }}>{u.plan === 'premium' ? '👑' : '🎣'}</div>
+          {/* row 1: avatar + name + plan badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+              background: u.is_blocked ? 'rgba(255,107,107,.15)' : u.plan === 'premium' ? `${C.gold}20` : `${C.teal}12`,
+              border: `1.5px solid ${u.is_blocked ? C.red + '50' : u.plan === 'premium' ? C.gold + '50' : C.teal + '30'}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+            }}>{u.is_blocked ? '🚫' : u.plan === 'premium' ? '👑' : '🎣'}</div>
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: C.white, marginBottom: 3 }}>
-              {u.name || 'Sans nom'}
-              {u.is_admin && <span style={{ marginLeft: 6, fontSize: 10, color: C.gold }}>⚡ Admin</span>}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: u.is_blocked ? C.red : C.white, marginBottom: 2 }}>
+                {u.name || 'Sans nom'}
+                {u.is_admin  && <span style={{ marginLeft: 6, fontSize: 10, color: C.gold   }}>⚡ Admin</span>}
+                {u.is_blocked && <span style={{ marginLeft: 6, fontSize: 10, color: C.red    }}>🚫 Bloqué</span>}
+              </div>
+              <div style={{ fontSize: 11, color: C.muted }}>{fmtDate(u.created_at)}</div>
             </div>
-            <div style={{ fontSize: 11, color: C.muted }}>{fmtDate(u.created_at)}</div>
+
+            <Badge label={u.plan === 'premium' ? '👑 Premium' : '🆓 Free'} color={u.plan === 'premium' ? C.gold : C.teal}/>
           </div>
 
-          <Badge label={u.plan === 'premium' ? '👑 Premium' : '🆓 Free'} color={u.plan === 'premium' ? C.gold : C.teal}/>
+          {/* row 2: action buttons */}
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+            {/* plan toggle */}
+            <button onClick={() => togglePlan(u)} disabled={toggling === u.id} style={{
+              padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700,
+              background: u.plan === 'premium' ? 'rgba(255,107,107,.15)' : `${C.teal}20`,
+              color: u.plan === 'premium' ? C.red : C.teal,
+            }}>{toggling === u.id ? '…' : u.plan === 'premium' ? '→ Free' : '→ Premium'}</button>
 
-          <button onClick={() => togglePlan(u)} disabled={toggling === u.id} style={{
-            padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700,
-            background: u.plan === 'premium' ? 'rgba(255,107,107,.15)' : `${C.teal}20`,
-            color: u.plan === 'premium' ? C.red : C.teal,
-          }}>{toggling === u.id ? '…' : u.plan === 'premium' ? '→ Free' : '→ Premium'}</button>
+            {/* block toggle */}
+            <button onClick={() => toggleBlock(u)} disabled={toggling === u.id + 'b'} style={{
+              padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700,
+              background: u.is_blocked ? `${C.green}15` : 'rgba(255,107,107,.15)',
+              color: u.is_blocked ? C.green : C.red,
+            }}>{toggling === u.id + 'b' ? '…' : u.is_blocked ? '✅ Débloquer' : '🚫 Bloquer'}</button>
 
-          <button onClick={() => toggleAdmin(u)} disabled={toggling === u.id + 'a'} title="Toggle Admin" style={{
-            width: 32, height: 32, borderRadius: 8, border: `1px solid ${u.is_admin ? C.gold + '40' : C.border}`,
-            background: u.is_admin ? `${C.gold}15` : 'rgba(255,255,255,.04)', cursor: 'pointer',
-            fontSize: 14, color: u.is_admin ? C.gold : C.muted,
-          }}>⚡</button>
+            {/* password reset */}
+            <button onClick={() => setReset(u)} style={{
+              padding: '7px 14px', borderRadius: 8, border: `1px solid ${C.border}`, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+              background: 'rgba(255,255,255,.05)', color: C.muted,
+            }}>🔑 Mot de passe</button>
+
+            {/* admin toggle */}
+            <button onClick={() => toggleAdmin(u)} disabled={toggling === u.id + 'a'} title="Toggle Admin" style={{
+              padding: '7px 12px', borderRadius: 8, border: `1px solid ${u.is_admin ? C.gold + '40' : C.border}`,
+              background: u.is_admin ? `${C.gold}15` : 'rgba(255,255,255,.04)', cursor: 'pointer',
+              fontSize: 13, color: u.is_admin ? C.gold : C.muted,
+            }}>⚡</button>
+          </div>
         </div>
       ))}
     </div>
@@ -207,13 +282,15 @@ function UsersTab() {
 
 // ── codes tab ─────────────────────────────────────────────────────────────────
 function CodesTab() {
-  const [genPlan, setGenPlan] = useState<'month' | 'year'>('month');
-  const [qty, setQty]         = useState(5);
-  const [busy, setBusy]       = useState(false);
-  const [freshRows, setFresh] = useState<Code[]>([]);
-  const [codes, setCodes]     = useState<Code[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [copied, setCopied]   = useState<string | null>(null);
+  const [genPlan, setGenPlan]   = useState<'month' | 'year'>('month');
+  const [qty, setQty]           = useState(5);
+  const [priceMonth, setPriceM] = useState('8.99');
+  const [priceYear,  setPriceY] = useState('49.99');
+  const [busy, setBusy]         = useState(false);
+  const [freshRows, setFresh]   = useState<Code[]>([]);
+  const [codes, setCodes]       = useState<Code[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [copied, setCopied]     = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -224,17 +301,25 @@ function CodesTab() {
 
   useEffect(() => { load(); }, [load]);
 
+  const currentPrice = genPlan === 'month' ? priceMonth : priceYear;
+
   async function generate() {
     setBusy(true);
-    const rows = Array.from({ length: qty }, () => ({ code: makeCode(), plan: genPlan }));
+    const price = parseFloat(currentPrice) || 0;
+    const rows = Array.from({ length: qty }, () => ({ code: makeCode(), plan: genPlan, price_tnd: price }));
     const { data } = await supabase.from('prepaid_codes').insert(rows).select('*');
     if (data) { setFresh(data as Code[]); load(); }
     setBusy(false);
   }
 
+  function priceLabel(r: Code) {
+    const p = r.price_tnd ?? (r.plan === 'year' ? 49.99 : 8.99);
+    return `${p.toFixed(2)} TND`;
+  }
+
   function copyAll() {
     const txt = freshRows.map(r =>
-      `${fmtSerial(r.serial)}  ${fmtCode(r.code)}  [${r.plan === 'year' ? '1 An — 49.99 TND' : '1 Mois — 8.99 TND'}]`
+      `${fmtSerial(r.serial)}  ${fmtCode(r.code)}  [${r.plan === 'year' ? '1 An' : '1 Mois'} — ${priceLabel(r)}]`
     ).join('\n');
     navigator.clipboard.writeText(txt);
     setCopied('all'); setTimeout(() => setCopied(null), 2000);
@@ -271,29 +356,50 @@ function CodesTab() {
       <div style={{ background: C.card, border: `1px solid ${C.teal}25`, borderRadius: 16, padding: 20, marginBottom: 24 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>✨ Générer des codes</div>
 
+        {/* Plan selector */}
+        <div style={{ fontSize: 10, color: C.muted, marginBottom: 8, letterSpacing: '.08em' }}>PLAN</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          {(['month', 'year'] as const).map(p => (
+            <button key={p} onClick={() => setGenPlan(p)} style={{
+              flex: 1, padding: '10px 0', border: 'none', borderRadius: 10, cursor: 'pointer',
+              fontWeight: 700, fontSize: 12,
+              background: genPlan === p ? (p === 'year' ? C.teal : C.gold) : 'rgba(255,255,255,.07)',
+              color: genPlan === p ? '#020D1F' : C.muted, transition: 'all .15s',
+            }}>{p === 'month' ? '1 Mois' : '1 An'}</button>
+          ))}
+        </div>
+
+        {/* Variable price + qty */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10, color: C.muted, marginBottom: 8, letterSpacing: '.08em' }}>PLAN</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {(['month', 'year'] as const).map(p => (
-                <button key={p} onClick={() => setGenPlan(p)} style={{
-                  flex: 1, padding: '10px 0', border: 'none', borderRadius: 10, cursor: 'pointer',
-                  fontWeight: 700, fontSize: 12,
-                  background: genPlan === p ? (p === 'year' ? C.teal : C.gold) : 'rgba(255,255,255,.07)',
-                  color: genPlan === p ? '#020D1F' : C.muted, transition: 'all .15s',
-                }}>{p === 'month' ? '1 Mois — 8.99 TND' : '1 An — 49.99 TND'}</button>
-              ))}
+            <div style={{ fontSize: 10, color: C.muted, marginBottom: 6, letterSpacing: '.08em' }}>
+              PRIX 1 MOIS (TND)
             </div>
+            <input type="number" value={priceMonth} onChange={e => setPriceM(e.target.value)}
+              step="0.5" min="0"
+              style={{ width: '100%', background: genPlan === 'month' ? `${C.gold}10` : 'rgba(255,255,255,.06)', border: `1.5px solid ${genPlan === 'month' ? C.gold + '60' : C.border}`, borderRadius: 10, padding: '10px 12px', color: genPlan === 'month' ? C.gold : C.white, fontSize: 16, fontWeight: 700, outline: 'none' }}/>
           </div>
-          <div style={{ width: 100 }}>
-            <div style={{ fontSize: 10, color: C.muted, marginBottom: 8, letterSpacing: '.08em' }}>QUANTITÉ</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: C.muted, marginBottom: 6, letterSpacing: '.08em' }}>
+              PRIX 1 AN (TND)
+            </div>
+            <input type="number" value={priceYear} onChange={e => setPriceY(e.target.value)}
+              step="0.5" min="0"
+              style={{ width: '100%', background: genPlan === 'year' ? `${C.teal}10` : 'rgba(255,255,255,.06)', border: `1.5px solid ${genPlan === 'year' ? C.teal + '60' : C.border}`, borderRadius: 10, padding: '10px 12px', color: genPlan === 'year' ? C.teal : C.white, fontSize: 16, fontWeight: 700, outline: 'none' }}/>
+          </div>
+          <div style={{ width: 90 }}>
+            <div style={{ fontSize: 10, color: C.muted, marginBottom: 6, letterSpacing: '.08em' }}>QUANTITÉ</div>
             <select value={qty} onChange={e => setQty(Number(e.target.value))} style={{
               width: '100%', background: 'rgba(255,255,255,.07)', border: `1px solid ${C.border}`,
-              borderRadius: 10, padding: '10px 8px', color: C.white, fontSize: 13, outline: 'none',
+              borderRadius: 10, padding: '10px 8px', color: C.white, fontSize: 13, outline: 'none', height: 42,
             }}>
               {[1,2,3,5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
             </select>
           </div>
+        </div>
+
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 12, textAlign: 'center' }}>
+          Génération : <b style={{ color: genPlan === 'year' ? C.teal : C.gold }}>{qty} × {genPlan === 'year' ? '1 An' : '1 Mois'} — {currentPrice} TND</b>
         </div>
 
         <button onClick={generate} disabled={busy} style={{
@@ -349,6 +455,7 @@ function CodesTab() {
             {fmtCode(r.code)}
           </span>
           <Badge label={r.plan === 'year' ? '1 An' : '1 Mois'} color={r.plan === 'year' ? C.teal : C.gold}/>
+          {r.price_tnd != null && <Badge label={`${r.price_tnd.toFixed(2)} TND`} color={C.muted}/>}
           <Badge label={r.used_by ? '✓ Utilisé' : '◉ Libre'} color={r.used_by ? C.red : C.green}/>
           {r.used_at && <span style={{ fontSize: 10, color: C.muted }}>{fmtDate(r.used_at)}</span>}
         </div>
