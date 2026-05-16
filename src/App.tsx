@@ -25,9 +25,20 @@ function makeCode() {
 function fmtCode(c: string) { return c.match(/.{1,4}/g)?.join('-') ?? c; }
 function fmtSerial(n: number) { return `#${String(n).padStart(5, '0')}`; }
 function fmtDate(d: string) { return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }); }
+function fmtDateTime(d: string) { return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+
+function premiumStatus(exp?: string | null): { label: string; color: string; daysLeft: number | null } {
+  if (!exp) return { label: 'Pas de premium', color: 'rgba(255,255,255,.2)', daysLeft: null };
+  const now = Date.now();
+  const end = new Date(exp).getTime();
+  const days = Math.ceil((end - now) / 86400000);
+  if (days < 0)  return { label: `Expiré il y a ${Math.abs(days)}j`, color: C.red,   daysLeft: days };
+  if (days <= 7) return { label: `⚠️ Expire dans ${days}j`,          color: C.gold,  daysLeft: days };
+  return              { label: `✅ Actif — ${days}j restants`,        color: C.green, daysLeft: days };
+}
 
 // ── types ─────────────────────────────────────────────────────────────────────
-interface Profile  { id: string; name: string; plan: string; is_admin: boolean; is_blocked: boolean; created_at: string; }
+interface Profile  { id: string; name: string; plan: string; is_admin: boolean; is_blocked: boolean; created_at: string; premium_expires_at?: string | null; }
 interface Code     { id: string; serial: number; code: string; plan: string; price_tnd?: number; used_by: string | null; used_at: string | null; created_at: string; }
 interface Catch    { id: string; user_id: string; fish_name: string; weight?: number; location?: string; date?: string; created_at: string; }
 interface Post     { id: string; user_id: string; content: string; likes?: number; created_at: string; }
@@ -236,14 +247,41 @@ function UsersTab() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: u.is_blocked ? C.red : C.white, marginBottom: 2 }}>
                 {u.name || 'Sans nom'}
-                {u.is_admin  && <span style={{ marginLeft: 6, fontSize: 10, color: C.gold   }}>⚡ Admin</span>}
-                {u.is_blocked && <span style={{ marginLeft: 6, fontSize: 10, color: C.red    }}>🚫 Bloqué</span>}
+                {u.is_admin   && <span style={{ marginLeft: 6, fontSize: 10, color: C.gold }}>⚡ Admin</span>}
+                {u.is_blocked && <span style={{ marginLeft: 6, fontSize: 10, color: C.red  }}>🚫 Bloqué</span>}
               </div>
-              <div style={{ fontSize: 11, color: C.muted }}>{fmtDate(u.created_at)}</div>
+              <div style={{ fontSize: 11, color: C.muted }}>Inscrit le {fmtDate(u.created_at)}</div>
             </div>
 
             <Badge label={u.plan === 'premium' ? '👑 Premium' : '🆓 Free'} color={u.plan === 'premium' ? C.gold : C.teal}/>
           </div>
+
+          {/* premium dates */}
+          {u.plan === 'premium' && (() => {
+            const st = premiumStatus(u.premium_expires_at);
+            const activeSince = u.premium_expires_at
+              ? new Date(new Date(u.premium_expires_at).getTime() - (st.daysLeft !== null && st.daysLeft > 0 ? 0 : 0)).getTime()
+              : null;
+            return (
+              <div style={{
+                background: 'rgba(0,0,0,.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 10,
+                border: `1px solid ${st.color}30`, display: 'flex', gap: 20, flexWrap: 'wrap',
+              }}>
+                {u.premium_expires_at && (
+                  <div>
+                    <div style={{ fontSize: 9, color: C.muted, letterSpacing: '.08em', marginBottom: 3 }}>EXPIRE LE</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.white }}>
+                      {fmtDateTime(u.premium_expires_at)}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <div style={{ fontSize: 9, color: C.muted, letterSpacing: '.08em', marginBottom: 3 }}>STATUT</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: st.color }}>{st.label}</div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* row 2: action buttons */}
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
