@@ -140,7 +140,7 @@ function ResetModal({ name, onClose }: { name: string; onClose: () => void }) {
     if (!email.includes('@')) return;
     setBusy(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin,
+      redirectTo: 'https://mankoussai.vercel.app',
     });
     setStatus(error ? 'err' : 'ok');
     setBusy(false);
